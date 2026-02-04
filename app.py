@@ -67,7 +67,29 @@ def extrair_bloco(rows, start_idx, end_idx):
         if any(v for v in vals):
             clean_rows.append(vals)
 
-    return pd.DataFrame(clean_rows, columns=header)
+    df = pd.DataFrame(clean_rows, columns=header)
+    
+    # Resolver nomes de colunas duplicados (causa do erro ValueError)
+    if df.empty:
+        return df
+    cols = df.columns.tolist()
+    seen = set()
+    new_cols = []
+    for col in cols:
+        if col in seen:
+            counter = 1
+            new_col = f"{col}_{counter}"
+            while new_col in seen:
+                counter += 1
+                new_col = f"{col}_{counter}"
+            new_cols.append(new_col)
+            seen.add(new_col)
+        else:
+            new_cols.append(col)
+            seen.add(col)
+    df.columns = new_cols
+    
+    return df
 
 def render_tabela(titulo, df):
     st.subheader(titulo)
