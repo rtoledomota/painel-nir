@@ -40,7 +40,7 @@ def achar_linha_titulo(rows, titulo):
     for i, row in enumerate(rows):
         for cell in row:
             cell_norm = normalizar(cell)
-            # Procura por substring (mais flexível)
+            # Procura por substring ou palavras-chave
             if titulo_norm in cell_norm or any(word in cell_norm for word in titulo_norm.split()):
                 return i
     return None
@@ -114,22 +114,29 @@ except Exception:
     st.error("Não foi possível carregar a planilha (CSV). Verifique se o link continua acessível sem login.")
     st.stop()
 
+# Seção de DEBUG (temporária - remova depois de ajustar)
+st.header("🔍 DEBUG - Análise do CSV (temporária)")
+st.write("**Primeiras 50 linhas do CSV (para verificar estrutura):**")
+debug_rows = rows[:50]
+for i, row in enumerate(debug_rows):
+    st.write(f"Linha {i}: {row}")
+
+st.write("**Índices dos títulos encontrados:**")
 idxs = {}
 for t in TITULOS:
     i = achar_linha_titulo(rows, t)
     if i is not None:
         idxs[normalizar(t)] = i
+        st.write(f"- '{t}' encontrado na linha {i}")
+    else:
+        st.write(f"- '{t}' NÃO encontrado")
 
+st.write("**Blocos extraídos (para verificar dados):**")
 ordem = ["ALTAS", "VAGAS RESERVADAS", "CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", "TRANSFERÊNCIAS/SAÍDAS"]
 if "TRANSFERÊNCIAS/SAÍDAS" not in idxs and "TRANSFERENCIAS SAIDAS" in idxs:
     ordem[-1] = "TRANSFERENCIAS SAIDAS"
 if "CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)" not in idxs and "CIRURGIAS PROGRAMADAS" in idxs:
     ordem[2] = "CIRURGIAS PROGRAMADAS"
-
-faltando = [t for t in ordem if normalizar(t) not in idxs]
-if faltando:
-    st.warning("Não encontrei os títulos de todas as tabelas no CSV. Confirme se na Folha1 existem exatamente estes títulos em uma célula: " + ", ".join(faltando))
-    st.info("Dica: os títulos são procurados ignorando maiúsculas/acentos. Se ainda não encontrar, me envie os títulos exatos que aparecem na planilha (ex.: 'ALTAS', 'VAGAS RESERVADAS').")
 
 posicoes = [(t, idxs[normalizar(t)]) for t in ordem if normalizar(t) in idxs]
 posicoes.sort(key=lambda x: x[1])
@@ -137,8 +144,15 @@ posicoes.sort(key=lambda x: x[1])
 blocos = {}
 for j, (titulo, start) in enumerate(posicoes):
     end = posicoes[j + 1][1] if j + 1 < len(posicoes) else len(rows)
-    blocos[titulo] = extrair_bloco(rows, start + 1, end)
+    bloco_df = extrair_bloco(rows, start + 1, end)
+    blocos[titulo] = bloco_df
+    st.write(f"**Bloco para '{titulo}' (linhas {start+1} a {end}):**")
+    if bloco_df.empty:
+        st.write("Vazio ou não conseguiu extrair.")
+    else:
+        st.dataframe(bloco_df)
 
+st.header("📊 Painel Principal")
 c1, c2 = st.columns(2)
 with c1:
     render_tabela("ALTAS", blocos.get("ALTAS", pd.DataFrame()))
