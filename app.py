@@ -14,9 +14,10 @@ st_autorefresh(interval=60_000, key="nir_autorefresh")  # 60s
 TITULOS = [
     "ALTAS",
     "VAGAS RESERVADAS",
-    "CIRURGIAS PROGRAMADAS - PROXIMO DIA",
-    "TRANSFERENCIAS/SAÍDAS",
-    "TRANSFERENCIAS SAIDAS",  # fallback sem barra
+    "CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)",
+    "TRANSFERÊNCIAS/SAÍDAS",
+    "CIRURGIAS PROGRAMADAS",  # fallback sem parênteses
+    "TRANSFERENCIAS SAIDAS",  # fallback sem barra/acentos
 ]
 
 def remover_acentos(s: str) -> str:
@@ -38,7 +39,9 @@ def achar_linha_titulo(rows, titulo):
     titulo_norm = normalizar(titulo)
     for i, row in enumerate(rows):
         for cell in row:
-            if titulo_norm in normalizar(cell):
+            cell_norm = normalizar(cell)
+            # Procura por substring (mais flexível)
+            if titulo_norm in cell_norm or any(word in cell_norm for word in titulo_norm.split()):
                 return i
     return None
 
@@ -69,7 +72,7 @@ def extrair_bloco(rows, start_idx, end_idx):
 
     df = pd.DataFrame(clean_rows, columns=header)
     
-    # Resolver nomes de colunas duplicados (causa do erro ValueError)
+    # Resolver nomes de colunas duplicados
     if df.empty:
         return df
     cols = df.columns.tolist()
@@ -117,9 +120,11 @@ for t in TITULOS:
     if i is not None:
         idxs[normalizar(t)] = i
 
-ordem = ["ALTAS", "VAGAS RESERVADAS", "CIRURGIAS PROGRAMADAS - PROXIMO DIA", "TRANSFERENCIAS/SAÍDAS"]
-if "TRANSFERENCIAS/SAÍDAS" not in idxs and "TRANSFERENCIAS SAIDAS" in idxs:
+ordem = ["ALTAS", "VAGAS RESERVADAS", "CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", "TRANSFERÊNCIAS/SAÍDAS"]
+if "TRANSFERÊNCIAS/SAÍDAS" not in idxs and "TRANSFERENCIAS SAIDAS" in idxs:
     ordem[-1] = "TRANSFERENCIAS SAIDAS"
+if "CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)" not in idxs and "CIRURGIAS PROGRAMADAS" in idxs:
+    ordem[2] = "CIRURGIAS PROGRAMADAS"
 
 faltando = [t for t in ordem if normalizar(t) not in idxs]
 if faltando:
@@ -142,7 +147,7 @@ with c2:
 
 c3, c4 = st.columns(2)
 with c3:
-    render_tabela("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", blocos.get("CIRURGIAS PROGRAMADAS - PROXIMO DIA", pd.DataFrame()))
+    render_tabela("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", blocos.get(ordem[2], pd.DataFrame()))
 with c4:
     render_tabela("TRANSFERÊNCIAS/SAÍDAS", blocos.get(ordem[-1], pd.DataFrame()))
 
