@@ -14,9 +14,9 @@ st_autorefresh(interval=60_000, key="nir_autorefresh")  # 60s
 TITULOS = [
     "ALTAS",
     "VAGAS RESERVADAS",
-    "CIRURGIAS PROGRAMADAS",
-    "TRANSFERÊNCIAS SAIDAS",
-    "TRANSFERENCIAS SAIDAS",  # fallback sem acento
+    "CIRURGIAS PROGRAMADAS - PROXIMO DIA",
+    "TRANSFERENCIAS/SAÍDAS",
+    "TRANSFERENCIAS SAIDAS",  # fallback sem barra
 ]
 
 def remover_acentos(s: str) -> str:
@@ -117,8 +117,8 @@ for t in TITULOS:
     if i is not None:
         idxs[normalizar(t)] = i
 
-ordem = ["ALTAS", "VAGAS RESERVADAS", "CIRURGIAS PROGRAMADAS", "TRANSFERÊNCIAS SAIDAS"]
-if "TRANSFERÊNCIAS SAIDAS" not in idxs and "TRANSFERENCIAS SAIDAS" in idxs:
+ordem = ["ALTAS", "VAGAS RESERVADAS", "CIRURGIAS PROGRAMADAS - PROXIMO DIA", "TRANSFERENCIAS/SAÍDAS"]
+if "TRANSFERENCIAS/SAÍDAS" not in idxs and "TRANSFERENCIAS SAIDAS" in idxs:
     ordem[-1] = "TRANSFERENCIAS SAIDAS"
 
 faltando = [t for t in ordem if normalizar(t) not in idxs]
@@ -142,8 +142,8 @@ with c2:
 
 c3, c4 = st.columns(2)
 with c3:
-    render_tabela("CIRURGIAS PROGRAMADAS", blocos.get("CIRURGIAS PROGRAMADAS", pd.DataFrame()))
+    render_tabela("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", blocos.get("CIRURGIAS PROGRAMADAS - PROXIMO DIA", pd.DataFrame()))
 with c4:
-    render_tabela("TRANSFERÊNCIAS SAÍDAS", blocos.get(ordem[-1], pd.DataFrame()))
+    render_tabela("TRANSFERÊNCIAS/SAÍDAS", blocos.get(ordem[-1], pd.DataFrame()))
 
 st.caption("Fonte: Google Sheets (Folha1). Atualização automática a cada 60s.")
