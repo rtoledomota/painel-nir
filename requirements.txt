@@ -1,4 +1,6 @@
-streamlit
-pandas
-streamlit-autorefresh
-requests
+painel-nir/
+  app.py
+  requirements.txt
+  assets/
+    logo_esquerda.png
+    logo_direita.png
