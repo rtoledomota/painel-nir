@@ -1,84 +1,284 @@
 import io
 import unicodedata
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
-import streamlit as st
 import requests
+import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+# ======================
+# CONFIG GERAL
+# ======================
 st.set_page_config(page_title="Painel NIR - Censo Diário", layout="wide")
 
+# Paleta aproximada dos logos (ajuste fino se quiser)
+PRIMARY = "#163A9A"        # azul
+PRIMARY_DARK = "#0B2B6B"
+ACCENT_GREEN = "#22A34A"   # verde
+ACCENT_RED = "#D62828"     # vermelho
+SCS_PURPLE = "#4B3FA6"     # roxo
+SCS_CYAN = "#33C7D6"       # ciano
+
+BG = "#F6F8FB"
+CARD_BG = "#FFFFFF"
+BORDER = "#E5E7EB"
+TEXT = "#0F172A"
+MUTED = "#64748B"
+
+# Logos no repositório
+# (Se seus arquivos forem .jpg/.jpeg, altere aqui também)
+LOGO_LEFT_PATH = Path("assets/logo_esquerda.png")
+LOGO_RIGHT_PATH = Path("assets/logo_direita.png")
+
+# Google Sheets
 SHEET_ID = "1wA--gbvOmHWcUvMBTldVC8HriI3IXfQoEvQEskCKGDk"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Folha1"
 
-st_autorefresh(interval=60_000, key="nir_autorefresh")
+# Auto refresh
+REFRESH_SECONDS = 60
+st_autorefresh(interval=REFRESH_SECONDS * 1000, key="nir_autorefresh")
 
+# ======================
+# CSS (responsivo automático: TV/desktop vs celular)
+# ======================
+st.markdown(
+    f"""
+    <style>
+      .stApp {{
+        background: {BG};
+        color: {TEXT};
+      }}
+
+      .nir-top {{
+        border-radius: 16px;
+        padding: 14px 16px;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: linear-gradient(90deg, {PRIMARY_DARK}, {PRIMARY} 45%, {SCS_PURPLE});
+        color: white;
+      }}
+      .nir-top-title {{
+        font-weight: 950;
+        letter-spacing: 0.2px;
+        line-height: 1.1;
+      }}
+      .nir-top-sub {{
+        margin-top: 4px;
+        opacity: 0.92;
+      }}
+
+      .nir-card {{
+        background: {CARD_BG};
+        border: 1px solid {BORDER};
+        border-radius: 16px;
+        padding: 14px 16px;
+        box-shadow: 0 1px 0 rgba(16,24,40,0.02);
+      }}
+      .nir-card-title {{
+        color: {MUTED};
+        font-weight: 800;
+        margin-bottom: 6px;
+      }}
+      .nir-card-value {{
+        font-weight: 950;
+        margin: 0;
+        line-height: 1.0;
+      }}
+
+      .nir-section-title {{
+        font-weight: 950;
+        margin-bottom: 6px;
+        color: {TEXT};
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }}
+      .nir-pill {{
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-weight: 900;
+        border: 1px solid {BORDER};
+        color: {TEXT};
+        background: #F8FAFC;
+        white-space: nowrap;
+      }}
+
+      div[data-testid="stDataFrame"] {{
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid {BORDER};
+      }}
+
+      /* Celular */
+      @media (max-width: 768px) {{
+        .block-container {{
+          padding-top: 0.8rem;
+          padding-left: 0.9rem;
+          padding-right: 0.9rem;
+        }}
+        .nir-top-title {{ font-size: 16px; }}
+        .nir-top-sub {{ font-size: 12px; }}
+        .nir-card-title {{ font-size: 12px; }}
+        .nir-card-value {{ font-size: 22px; }}
+        .nir-section-title {{ font-size: 14px; }}
+        .nir-pill {{ font-size: 11px; }}
+      }}
+
+      /* TV / FullHD / Desktop */
+      @media (min-width: 1200px) {{
+        .block-container {{
+          padding-top: 1.4rem;
+          padding-left: 1.6rem;
+          padding-right: 1.6rem;
+        }}
+        .nir-top-title {{ font-size: 24px; }}
+        .nir-top-sub {{ font-size: 14px; }}
+        .nir-card-title {{ font-size: 13px; }}
+        .nir-card-value {{ font-size: 32px; }}
+        .nir-section-title {{ font-size: 16px; }}
+        .nir-pill {{ font-size: 12px; }}
+      }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ======================
+# Helpers
+# ======================
 def _remover_acentos(s: str) -> str:
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode("ascii")
 
+
 def _norm(s: str) -> str:
     return _remover_acentos((s or "").strip().upper())
+
+
+def to_int_series(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce").fillna(0).astype(int)
+
 
 @st.cache_data(ttl=30)
 def baixar_csv_como_matriz(url: str) -> list[list[str]]:
     r = requests.get(url, timeout=30)
     r.raise_for_status()
-
-    # Lê como “matriz” para não quebrar quando linhas têm tamanhos diferentes
-    df = pd.read_csv(io.StringIO(r.text), header=None, dtype=str, engine="python")
-    df = df.fillna("")
+    # Lê “solto” para não quebrar com linhas de tamanhos diferentes
+    df = pd.read_csv(io.StringIO(r.text), header=None, dtype=str, engine="python").fillna("")
     return df.values.tolist()
 
-def achar_linha(rows: list[list[str]], texto: str) -> int | None:
+
+def achar_linha_exata(rows: list[list[str]], texto: str) -> int | None:
     alvo = _norm(texto)
     for i, row in enumerate(rows):
         for cell in row:
-            if alvo == _norm(cell):
+            if _norm(cell) == alvo:
                 return i
     return None
 
+
 def slice_rows(rows: list[list[str]], start: int, end: int) -> list[list[str]]:
     bloco = rows[start:end]
-    # remove linhas totalmente vazias
     return [r for r in bloco if any(str(c).strip() for c in r)]
 
-def to_int_series(s: pd.Series) -> pd.Series:
-    return pd.to_numeric(s, errors="coerce").fillna(0).astype(int)
 
-def montar_altas(rows: list[list[str]], i_altas: int, i_vagas: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_altas, i_vagas)
-    if len(bloco) < 2:
+def safe_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Evita erro do Streamlit/PyArrow (colunas duplicadas e tipos problemáticos)."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.copy()
+
+    # Renomear colunas duplicadas
+    cols = list(df.columns)
+    seen: dict[str, int] = {}
+    new_cols = []
+    for c in cols:
+        key = str(c).strip()
+        if key in seen:
+            seen[key] += 1
+            new_cols.append(f"{key}_{seen[key]}")
+        else:
+            seen[key] = 0
+            new_cols.append(key)
+    df.columns = new_cols
+
+    return df
+
+
+def render_metric_card(title: str, value: int, color: str):
+    st.markdown(
+        f"""
+        <div class="nir-card">
+          <div class="nir-card-title">{title}</div>
+          <div class="nir-card-value" style="color:{color}">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_section_header(title: str, pill: str):
+    st.markdown(
+        f"""
+        <div class="nir-section-title">
+          <div>{title}</div>
+          <span class="nir-pill">{pill}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_df(df: pd.DataFrame):
+    df = safe_df_for_display(df)
+    if df.empty:
+        st.info("Sem dados para exibir.")
+        return
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def render_logo(path: Path):
+    """Mostra logo sem derrubar o app caso o arquivo não exista."""
+    if path.exists():
+        st.image(str(path), use_container_width=True)
+    else:
+        # Fallback “silencioso” (não quebra)
+        st.caption(f"Arquivo não encontrado: {path.as_posix()}")
+
+
+# ======================
+# Parsing determinístico do seu CSV (conforme debug)
+# ======================
+def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_altas_header, i_vagas_title)
+    if len(bloco) &lt; 2:
         return pd.DataFrame()
 
     header = bloco[0][:4]
     data = [r[:4] for r in bloco[1:]]
-    df = pd.DataFrame(data, columns=header)
 
-    # padroniza nomes
-    rename = {
-        "ALTAS HOSPITAL": "HOSPITAL",
-        "SETOR": "SETOR",
-        "ALTAS DO DIA (ATÉ 19H)": "ALTAS_DO_DIA_ATE_19H",
-        "ALTAS PREVISTAS 24H": "ALTAS_PREVISTAS_24H",
-    }
-    df = df.rename(columns={c: rename.get(c, c) for c in df.columns})
+    df = pd.DataFrame(data, columns=header).rename(
+        columns={
+            "ALTAS HOSPITAL": "HOSPITAL",
+            "SETOR": "SETOR",
+            "ALTAS DO DIA (ATÉ 19H)": "REALIZADAS_ATÉ_19H",
+            "ALTAS PREVISTAS 24H": "PREVISTAS_24H",
+        }
+    )
 
-    # remove linhas “sem números” (no seu CSV aparecem várias com vazio)
-    if "ALTAS_DO_DIA_ATE_19H" in df.columns:
-        df["ALTAS_DO_DIA_ATE_19H"] = to_int_series(df["ALTAS_DO_DIA_ATE_19H"])
-    if "ALTAS_PREVISTAS_24H" in df.columns:
-        df["ALTAS_PREVISTAS_24H"] = to_int_series(df["ALTAS_PREVISTAS_24H"])
-
-    # mantém apenas linhas em que há hospital + setor
+    df["REALIZADAS_ATÉ_19H"] = to_int_series(df["REALIZADAS_ATÉ_19H"])
+    df["PREVISTAS_24H"] = to_int_series(df["PREVISTAS_24H"])
     df = df[(df["HOSPITAL"].astype(str).str.strip() != "") & (df["SETOR"].astype(str).str.strip() != "")]
-
     return df
 
-def montar_vagas(rows: list[list[str]], i_vagas: int, i_cir: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_vagas + 1, i_cir)  # pula o título
+
+def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_cir_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_vagas_title + 1, i_cir_title)
     if not bloco:
         return pd.DataFrame()
 
-    # Padrão observado: [HOSPITAL, SETOR, VAGAS, ...]
     data = []
     for r in bloco:
         hosp = (r[0] if len(r) > 0 else "").strip()
@@ -92,105 +292,163 @@ def montar_vagas(rows: list[list[str]], i_vagas: int, i_cir: int) -> pd.DataFram
     df = df[(df["HOSPITAL"] != "") & (df["SETOR"] != "")]
     return df
 
-def montar_cirurgias(rows: list[list[str]], i_cir: int, i_transf: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_cir + 1, i_transf)  # pula o título
+
+def montar_cirurgias(rows: list[list[str]], i_cir_title: int, i_transf_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_cir_title + 1, i_transf_title)
     if not bloco:
         return pd.DataFrame()
 
-    # Padrão observado (linha 23):
-    # [HOSPITAL, "CIRURGIAS PROGRAMADAS - PROXIMO DIA", "16", ...]
     data = []
     for r in bloco:
         hosp = (r[0] if len(r) > 0 else "").strip()
         desc = (r[1] if len(r) > 1 else "").strip()
-        val = (r[2] if len(r) > 2 else "").strip()
-        if hosp or desc or val:
-            data.append([hosp, desc, val])
+        total = (r[2] if len(r) > 2 else "").strip()
+        if hosp or desc or total:
+            data.append([hosp, desc, total])
 
-    df = pd.DataFrame(data, columns=["HOSPITAL", "DESCRICAO", "VALOR"])
-    df["VALOR"] = to_int_series(df["VALOR"])
-
-    # remove linhas vazias
-    df = df[(df["HOSPITAL"] != "") | (df["DESCRICAO"] != "") | (df["VALOR"] != 0)]
+    df = pd.DataFrame(data, columns=["HOSPITAL", "DESCRIÇÃO", "TOTAL"])
+    df["TOTAL"] = to_int_series(df["TOTAL"])
     return df
 
-def montar_transferencias(rows: list[list[str]], i_transf: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_transf + 1, len(rows))  # até o fim
+
+def montar_transferencias(rows: list[list[str]], i_transf_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_transf_title + 1, len(rows))
     if not bloco:
         return pd.DataFrame()
 
-    # Padrões possíveis:
-    # - ["CROSS", ...]
-    # - ["PLATAFORMA", ...]
-    # - ["TOTAL", "0", ...]
     data = []
     for r in bloco:
         desc = (r[0] if len(r) > 0 else "").strip()
-        val = (r[1] if len(r) > 1 else "").strip()  # no TOTAL aparece "0" na coluna 2
-        if desc == "":
-            continue
-        data.append([desc, val])
+        val = (r[1] if len(r) > 1 else "").strip()
+        if desc:
+            data.append([desc, val])
 
-    df = pd.DataFrame(data, columns=["DESCRICAO", "VALOR"])
-    df["VALOR"] = to_int_series(df["VALOR"])
+    df = pd.DataFrame(data, columns=["DESCRIÇÃO", "TOTAL"])
+    df["TOTAL"] = to_int_series(df["TOTAL"])
     return df
 
-def render_df(titulo: str, df: pd.DataFrame):
-    st.subheader(titulo)
-    if df is None or df.empty:
-        st.info("Sem dados para exibir.")
-        return
-    st.dataframe(df, use_container_width=True, hide_index=True)
 
-st.title("Painel NIR – Censo Diário")
+# ======================
+# HEADER COM LOGOS
+# ======================
+top_l, top_c, top_r = st.columns([1.2, 5.6, 1.2])
 
-if st.button("Atualizar agora"):
-    st.cache_data.clear()
+with top_l:
+    render_logo(LOGO_LEFT_PATH)
 
-rows = baixar_csv_como_matriz(CSV_URL)
+with top_c:
+    st.markdown(
+        f"""
+        <div class="nir-top">
+          <div class="nir-top-title">Painel NIR – Censo Diário</div>
+          <div class="nir-top-sub">Atualização automática a cada {REFRESH_SECONDS}s • Fonte: Google Sheets</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# encontra marcadores
-i_altas = achar_linha(rows, "ALTAS HOSPITAL")
-i_vagas = achar_linha(rows, "VAGAS RESERVADAS")
-i_cir = achar_linha(rows, "CIRURGIAS PROGRAMADAS - PROXIMO DIA")
-i_transf = achar_linha(rows, "TRANSFERENCIAS/SAÍDAS")
+with top_r:
+    render_logo(LOGO_RIGHT_PATH)
 
-# fallback: se algum não achar, tenta versões normalizadas
-if i_altas is None:
-    i_altas = achar_linha(rows, "ALTAS")
-if i_transf is None:
-    i_transf = achar_linha(rows, "TRANSFERENCIAS/SAIDAS")
-if i_cir is None:
-    i_cir = achar_linha(rows, "CIRURGIAS PROGRAMADAS")
+st.markdown("")
 
-# validações
+# Controles
+b1, b2, b3 = st.columns([1.3, 3.7, 2.0])
+with b1:
+    if st.button("Atualizar agora"):
+        st.cache_data.clear()
+with b3:
+    st.caption(f"Última renderização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
+st.markdown("")
+
+# ======================
+# LOAD + PARSE
+# ======================
+try:
+    rows = baixar_csv_como_matriz(CSV_URL)
+except Exception:
+    st.error("Não foi possível carregar o CSV da planilha. Verifique permissões/publicação do Google Sheets.")
+    st.stop()
+
+i_altas_header = achar_linha_exata(rows, "ALTAS HOSPITAL")
+i_vagas_title = achar_linha_exata(rows, "VAGAS RESERVADAS")
+i_cir_title = achar_linha_exata(rows, "CIRURGIAS PROGRAMADAS - PROXIMO DIA")
+i_transf_title = achar_linha_exata(rows, "TRANSFERENCIAS/SAÍDAS")
+
 missing = []
-if i_altas is None: missing.append("ALTAS HOSPITAL")
-if i_vagas is None: missing.append("VAGAS RESERVADAS")
-if i_cir is None: missing.append("CIRURGIAS PROGRAMADAS - PROXIMO DIA")
-if i_transf is None: missing.append("TRANSFERENCIAS/SAÍDAS")
+if i_altas_header is None: missing.append("ALTAS HOSPITAL")
+if i_vagas_title is None: missing.append("VAGAS RESERVADAS")
+if i_cir_title is None: missing.append("CIRURGIAS PROGRAMADAS - PROXIMO DIA")
+if i_transf_title is None: missing.append("TRANSFERENCIAS/SAÍDAS")
 
 if missing:
     st.error("Não encontrei estes marcadores no CSV: " + ", ".join(missing))
     st.stop()
 
-# monta dfs
-df_altas = montar_altas(rows, i_altas, i_vagas)
-df_vagas = montar_vagas(rows, i_vagas, i_cir)
-df_cir = montar_cirurgias(rows, i_cir, i_transf)
-df_transf = montar_transferencias(rows, i_transf)
+df_altas = montar_altas(rows, i_altas_header, i_vagas_title)
+df_vagas = montar_vagas(rows, i_vagas_title, i_cir_title)
+df_cir = montar_cirurgias(rows, i_cir_title, i_transf_title)
+df_transf = montar_transferencias(rows, i_transf_title)
 
-# layout dashboard
+# ======================
+# MÉTRICAS
+# ======================
+m1, m2, m3, m4 = st.columns(4)
+with m1:
+    render_metric_card(
+        "Altas realizadas (até 19h)",
+        int(df_altas["REALIZADAS_ATÉ_19H"].sum()) if not df_altas.empty else 0,
+        PRIMARY,
+    )
+with m2:
+    render_metric_card(
+        "Altas previstas (24h)",
+        int(df_altas["PREVISTAS_24H"].sum()) if not df_altas.empty else 0,
+        ACCENT_GREEN,
+    )
+with m3:
+    render_metric_card(
+        "Vagas reservadas",
+        int(df_vagas["VAGAS_RESERVADAS"].sum()) if not df_vagas.empty else 0,
+        SCS_PURPLE,
+    )
+with m4:
+    render_metric_card(
+        "Cirurgias (próximo dia)",
+        int(df_cir["TOTAL"].sum()) if not df_cir.empty else 0,
+        SCS_CYAN,
+    )
+
+st.markdown("")
+
+# ======================
+# TABELAS (2x2)
+# ======================
 c1, c2 = st.columns(2)
 with c1:
-    render_df("ALTAS", df_altas)
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("ALTAS", f"{len(df_altas)} linhas")
+    render_df(df_altas)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 with c2:
-    render_df("VAGAS RESERVADAS", df_vagas)
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("VAGAS RESERVADAS", f"{len(df_vagas)} linhas")
+    render_df(df_vagas)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 c3, c4 = st.columns(2)
 with c3:
-    render_df("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", df_cir)
-with c4:
-    render_df("TRANSFERÊNCIAS/SAÍDAS", df_transf)
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", f"{len(df_cir)} linhas")
+    render_df(df_cir)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.caption("Fonte: Google Sheets (Folha1). Atualização automática a cada 60s.")
+with c4:
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("TRANSFERÊNCIAS/SAÍDAS", f"{len(df_transf)} linhas")
+    render_df(df_transf)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.caption("Fonte: Google Sheets (Folha1).")
