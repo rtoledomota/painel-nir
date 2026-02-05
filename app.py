@@ -266,4 +266,185 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
     return df
 
 
-def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_cir_title: int) 
+def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_cir_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_vagas_title + 1, i_cir_title)
+    if not bloco:
+        return pd.DataFrame()
+
+    data = []
+    for r in bloco:
+        hosp = (r[0] if len(r) > 0 else "").strip()
+        setor = (r[1] if len(r) > 1 else "").strip()
+        vagas = (r[2] if len(r) > 2 else "").strip()
+        if hosp or setor or vagas:
+            data.append([hosp, setor, vagas])
+
+    df = pd.DataFrame(data, columns=["HOSPITAL", "SETOR", "VAGAS_RESERVADAS"])
+    df["VAGAS_RESERVADAS"] = to_int_series(df["VAGAS_RESERVADAS"])
+    df = df[(df["HOSPITAL"] != "") & (df["SETOR"] != "")]
+    return df
+
+
+def montar_cirurgias(rows: list[list[str]], i_cir_title: int, i_transf_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_cir_title + 1, i_transf_title)
+    if not bloco:
+        return pd.DataFrame()
+
+    data = []
+    for r in bloco:
+        hosp = (r[0] if len(r) > 0 else "").strip()
+        desc = (r[1] if len(r) > 1 else "").strip()
+        total = (r[2] if len(r) > 2 else "").strip()
+        if hosp or desc or total:
+            data.append([hosp, desc, total])
+
+    df = pd.DataFrame(data, columns=["HOSPITAL", "DESCRIÇÃO", "TOTAL"])
+    df["TOTAL"] = to_int_series(df["TOTAL"])
+    return df
+
+
+def montar_transferencias(rows: list[list[str]], i_transf_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_transf_title + 1, len(rows))
+    if not bloco:
+        return pd.DataFrame()
+
+    data = []
+    for r in bloco:
+        desc = (r[0] if len(r) > 0 else "").strip()
+        val = (r[1] if len(r) > 1 else "").strip()
+        if desc:
+            data.append([desc, val])
+
+    df = pd.DataFrame(data, columns=["DESCRIÇÃO", "TOTAL"])
+    df["TOTAL"] = to_int_series(df["TOTAL"])
+    return df
+
+
+# ======================
+# HEADER COM LOGOS
+# ======================
+top_l, top_c, top_r = st.columns([1.2, 5.6, 1.2])
+
+with top_l:
+    render_logo(LOGO_LEFT_PATH)
+
+with top_c:
+    st.markdown(
+        f"""
+        <div class="nir-top">
+          <div class="nir-top-title">Painel NIR – Censo Diário</div>
+          <div class="nir-top-sub">Atualização automática a cada {REFRESH_SECONDS}s • Fonte: Google Sheets</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with top_r:
+    render_logo(LOGO_RIGHT_PATH)
+
+st.markdown("")
+
+# Controles
+b1, b2, b3 = st.columns([1.3, 3.7, 2.0])
+with b1:
+    if st.button("Atualizar agora"):
+        st.cache_data.clear()
+with b3:
+    st.caption(f"Última renderização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
+st.markdown("")
+
+# ======================
+# LOAD + PARSE
+# ======================
+try:
+    rows = baixar_csv_como_matriz(CSV_URL)
+except Exception:
+    st.error("Não foi possível carregar o CSV da planilha. Verifique permissões/publicação do Google Sheets.")
+    st.stop()
+
+i_altas_header = achar_linha_exata(rows, "ALTAS HOSPITAL")
+i_vagas_title = achar_linha_exata(rows, "VAGAS RESERVADAS")
+i_cir_title = achar_linha_exata(rows, "CIRURGIAS PROGRAMADAS - PROXIMO DIA")
+i_transf_title = achar_linha_exata(rows, "TRANSFERENCIAS/SAÍDAS")
+
+missing = []
+if i_altas_header is None:
+    missing.append("ALTAS HOSPITAL")
+if i_vagas_title is None:
+    missing.append("VAGAS RESERVADAS")
+if i_cir_title is None:
+    missing.append("CIRURGIAS PROGRAMADAS - PROXIMO DIA")
+if i_transf_title is None:
+    missing.append("TRANSFERENCIAS/SAÍDAS")
+
+if missing:
+    st.error("Não encontrei estes marcadores no CSV: " + ", ".join(missing))
+    st.stop()
+
+df_altas = montar_altas(rows, i_altas_header, i_vagas_title)
+df_vagas = montar_vagas(rows, i_vagas_title, i_cir_title)
+df_cir = montar_cirurgias(rows, i_cir_title, i_transf_title)
+df_transf = montar_transferencias(rows, i_transf_title)
+
+# ======================
+# MÉTRICAS
+# ======================
+m1, m2, m3, m4 = st.columns(4)
+with m1:
+    render_metric_card(
+        "Altas realizadas (até 19h)",
+        int(df_altas["REALIZADAS_ATÉ_19H"].sum()) if not df_altas.empty else 0,
+        PRIMARY,
+    )
+with m2:
+    render_metric_card(
+        "Altas previstas (24h)",
+        int(df_altas["PREVISTAS_24H"].sum()) if not df_altas.empty else 0,
+        ACCENT_GREEN,
+    )
+with m3:
+    render_metric_card(
+        "Vagas reservadas",
+        int(df_vagas["VAGAS_RESERVADAS"].sum()) if not df_vagas.empty else 0,
+        SCS_PURPLE,
+    )
+with m4:
+    render_metric_card(
+        "Cirurgias (próximo dia)",
+        int(df_cir["TOTAL"].sum()) if not df_cir.empty else 0,
+        SCS_CYAN,
+    )
+
+st.markdown("")
+
+# ======================
+# TABELAS (2x2)
+# ======================
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("ALTAS", f"{len(df_altas)} linhas")
+    render_df(df_altas)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with c2:
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("VAGAS RESERVADAS", f"{len(df_vagas)} linhas")
+    render_df(df_vagas)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+c3, c4 = st.columns(2)
+with c3:
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", f"{len(df_cir)} linhas")
+    render_df(df_cir)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with c4:
+    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+    render_section_header("TRANSFERÊNCIAS/SAÍDAS", f"{len(df_transf)} linhas")
+    render_df(df_transf)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.caption("Fonte: Google Sheets (Folha1).")
