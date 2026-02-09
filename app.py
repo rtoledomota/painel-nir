@@ -35,7 +35,7 @@ REFRESH_SECONDS = 60
 st_autorefresh(interval=REFRESH_SECONDS * 1000, key="nir_autorefresh")
 
 # ======================
-# CSS (responsivo automático)
+# CSS (responsivo automático + ajustes estéticos)
 # ======================
 st.markdown(
     f"""
@@ -44,22 +44,38 @@ st.markdown(
         background: {BG};
         color: {TEXT};
       }}
+
+      /* Header */
       .nir-top {{
         border-radius: 16px;
-        padding: 14px 16px;
+        padding: 16px 18px;
         border: 1px solid rgba(255,255,255,0.15);
         background: linear-gradient(90deg, {PRIMARY_DARK}, {PRIMARY} 45%, {SCS_PURPLE});
         color: white;
+        text-align: center; /* centraliza */
       }}
       .nir-top-title {{
-        font-weight: 950;
+        font-weight: 980;
         letter-spacing: 0.2px;
-        line-height: 1.1;
+        line-height: 1.05;
+        margin: 0 auto;
       }}
       .nir-top-sub {{
-        margin-top: 4px;
+        margin-top: 6px;
         opacity: 0.92;
+        margin-left: auto;
+        margin-right: auto;
       }}
+
+      /* Wrapper para padronizar altura dos logos */
+      .nir-logo-wrap {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+      }}
+
+      /* Cards */
       .nir-card {{
         background: {CARD_BG};
         border: 1px solid {BORDER};
@@ -77,6 +93,8 @@ st.markdown(
         margin: 0;
         line-height: 1.0;
       }}
+
+      /* Seções */
       .nir-section-title {{
         font-weight: 950;
         margin-bottom: 6px;
@@ -95,36 +113,56 @@ st.markdown(
         background: #F8FAFC;
         white-space: nowrap;
       }}
+
+      /* Dataframes */
       div[data-testid="stDataFrame"] {{
         border-radius: 12px;
         overflow: hidden;
         border: 1px solid {BORDER};
       }}
+
+      /* ===== Celular ===== */
       @media (max-width: 768px) {{
         .block-container {{
           padding-top: 0.8rem;
           padding-left: 0.9rem;
           padding-right: 0.9rem;
         }}
-        .nir-top-title {{ font-size: 16px; }}
+        .nir-top-title {{ font-size: 18px; }}
         .nir-top-sub {{ font-size: 12px; }}
         .nir-card-title {{ font-size: 12px; }}
         .nir-card-value {{ font-size: 22px; }}
         .nir-section-title {{ font-size: 14px; }}
         .nir-pill {{ font-size: 11px; }}
+
+        /* logos mesma altura no celular */
+        .nir-logo-wrap img {{
+          height: 56px !important;
+          width: auto !important;
+          object-fit: contain !important;
+        }}
       }}
+
+      /* ===== TV/Full HD e Desktop ===== */
       @media (min-width: 1200px) {{
         .block-container {{
           padding-top: 1.4rem;
           padding-left: 1.6rem;
           padding-right: 1.6rem;
         }}
-        .nir-top-title {{ font-size: 24px; }}
-        .nir-top-sub {{ font-size: 14px; }}
+        .nir-top-title {{ font-size: 34px; }}  /* título maior */
+        .nir-top-sub {{ font-size: 15px; }}
         .nir-card-title {{ font-size: 13px; }}
         .nir-card-value {{ font-size: 32px; }}
         .nir-section-title {{ font-size: 16px; }}
         .nir-pill {{ font-size: 12px; }}
+
+        /* logos mesma altura na TV */
+        .nir-logo-wrap img {{
+          height: 96px !important;
+          width: auto !important;
+          object-fit: contain !important;
+        }}
       }}
     </style>
     """,
@@ -264,14 +302,12 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
 
     df = pd.DataFrame(data, columns=header)
 
-    # Padronização mínima
     rename = {
         "ALTAS HOSPITAL": "HOSPITAL",
         "SETOR": "SETOR",
     }
     df = df.rename(columns={c: rename.get(str(c).strip(), str(c).strip()) for c in df.columns})
 
-    # Converte colunas numéricas se existirem
     col_realizadas = find_col_by_contains(df, "ALTAS DO DIA")
     col_previstas = find_col_by_contains(df, "ALTAS PREVISTAS")
     if col_realizadas:
@@ -279,7 +315,6 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
     if col_previstas:
         df[col_previstas] = to_int_series(df[col_previstas])
 
-    # Filtro mínimo
     if "HOSPITAL" in df.columns and "SETOR" in df.columns:
         df = df[(df["HOSPITAL"].astype(str).str.strip() != "") & (df["SETOR"].astype(str).str.strip() != "")]
     return df
@@ -300,7 +335,6 @@ def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_transf_title: int)
         setor = (r[1] if len(r) > 1 else "").strip()
         vagas = (r[2] if len(r) > 2 else "").strip()
 
-        # Mantém linhas que tenham pelo menos SETOR ou VAGAS
         if setor == "" and vagas == "":
             continue
 
@@ -308,13 +342,8 @@ def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_transf_title: int)
 
     df = pd.DataFrame(data, columns=["HOSPITAL", "SETOR", "VAGAS_RESERVADAS"])
 
-    # Preenche HOSPITAL para baixo (para linhas tipo "UTI" que vêm com hosp vazio)
     df["HOSPITAL"] = df["HOSPITAL"].replace("", pd.NA).ffill().fillna("")
-
-    # Converte vagas
     df["VAGAS_RESERVADAS"] = to_int_series(df["VAGAS_RESERVADAS"])
-
-    # Mantém apenas linhas com SETOR (ENFERMARIA, UTI, etc.)
     df = df[df["SETOR"].astype(str).str.strip() != ""]
 
     return df
@@ -338,11 +367,15 @@ def montar_transferencias(rows: list[list[str]], i_transf_title: int) -> pd.Data
 
 
 # ======================
-# HEADER COM LOGOS
+# HEADER COM LOGOS (altura padronizada por CSS)
 # ======================
 top_l, top_c, top_r = st.columns([1.2, 5.6, 1.2])
+
 with top_l:
+    st.markdown("<div class='nir-logo-wrap'>", unsafe_allow_html=True)
     render_logo(LOGO_LEFT_PATH)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 with top_c:
     st.markdown(
         f"""
@@ -353,11 +386,15 @@ with top_c:
         """,
         unsafe_allow_html=True,
     )
+
 with top_r:
+    st.markdown("<div class='nir-logo-wrap'>", unsafe_allow_html=True)
     render_logo(LOGO_RIGHT_PATH)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("")
 
+# Controles
 b1, b2, b3 = st.columns([1.3, 3.7, 2.0])
 with b1:
     if st.button("Atualizar agora"):
