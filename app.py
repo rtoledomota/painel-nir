@@ -264,12 +264,14 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
 
     df = pd.DataFrame(data, columns=header)
 
+    # Padronização mínima
     rename = {
         "ALTAS HOSPITAL": "HOSPITAL",
         "SETOR": "SETOR",
     }
     df = df.rename(columns={c: rename.get(str(c).strip(), str(c).strip()) for c in df.columns})
 
+    # Converte colunas numéricas se existirem
     col_realizadas = find_col_by_contains(df, "ALTAS DO DIA")
     col_previstas = find_col_by_contains(df, "ALTAS PREVISTAS")
     if col_realizadas:
@@ -277,13 +279,17 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
     if col_previstas:
         df[col_previstas] = to_int_series(df[col_previstas])
 
-    # Se não existir HOSPITAL/SETOR (caso tenham mudado), evita quebrar
+    # Filtro mínimo
     if "HOSPITAL" in df.columns and "SETOR" in df.columns:
         df = df[(df["HOSPITAL"].astype(str).str.strip() != "") & (df["SETOR"].astype(str).str.strip() != "")]
     return df
 
 
 def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_transf_title: int) -> pd.DataFrame:
+    """
+    Correção: preserva a 2ª linha (ex.: UTI) mesmo quando HOSPITAL vem vazio.
+    Regra: mantém linhas com SETOR ou VAGAS, e faz forward-fill do HOSPITAL.
+    """
     bloco = slice_rows(rows, i_vagas_title + 1, i_transf_title)
     if not bloco:
         return pd.DataFrame()
@@ -293,12 +299,24 @@ def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_transf_title: int)
         hosp = (r[0] if len(r) > 0 else "").strip()
         setor = (r[1] if len(r) > 1 else "").strip()
         vagas = (r[2] if len(r) > 2 else "").strip()
-        if hosp or setor or vagas:
-            data.append([hosp, setor, vagas])
+
+        # Mantém linhas que tenham pelo menos SETOR ou VAGAS
+        if setor == "" and vagas == "":
+            continue
+
+        data.append([hosp, setor, vagas])
 
     df = pd.DataFrame(data, columns=["HOSPITAL", "SETOR", "VAGAS_RESERVADAS"])
+
+    # Preenche HOSPITAL para baixo (para linhas tipo "UTI" que vêm com hosp vazio)
+    df["HOSPITAL"] = df["HOSPITAL"].replace("", pd.NA).ffill().fillna("")
+
+    # Converte vagas
     df["VAGAS_RESERVADAS"] = to_int_series(df["VAGAS_RESERVADAS"])
-    df = df[(df["HOSPITAL"] != "") & (df["SETOR"] != "")]
+
+    # Mantém apenas linhas com SETOR (ENFERMARIA, UTI, etc.)
+    df = df[df["SETOR"].astype(str).str.strip() != ""]
+
     return df
 
 
@@ -358,7 +376,6 @@ except Exception:
     st.error("Não foi possível carregar o CSV da planilha. Verifique permissões/publicação do Google Sheets.")
     st.stop()
 
-# Marcadores por substring (ALTAS pode ter data entre parênteses)
 i_altas_header = achar_linha_por_substring(rows, "ALTAS")
 i_vagas_title = achar_linha_por_substring(rows, "VAGAS RESERVADAS")
 i_transf_title = achar_linha_por_substring(rows, "TRANSFERENCIAS")
@@ -403,7 +420,7 @@ with m4:
 st.markdown("")
 
 # ======================
-# TABELAS (3 blocos)
+# TABELAS
 # ======================
 c1, c2 = st.columns(2)
 with c1:
