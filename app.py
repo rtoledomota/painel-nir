@@ -155,7 +155,6 @@ def baixar_csv_como_matriz(url: str) -> list[list[str]]:
 
 
 def achar_linha_por_substring(rows: list[list[str]], substring: str) -> int | None:
-    """Procura por uma linha que contenha a substring (normalizada)."""
     alvo = _norm(substring)
     for i, row in enumerate(rows):
         for cell in row:
@@ -231,7 +230,6 @@ def render_logo(path: Path):
 
 
 def find_col_by_contains(df: pd.DataFrame, contains_norm: str) -> str | None:
-    """Encontra a primeira coluna cujo nome (normalizado) contém um trecho."""
     target = _norm(contains_norm)
     for c in df.columns:
         if target in _norm(str(c)):
@@ -240,14 +238,13 @@ def find_col_by_contains(df: pd.DataFrame, contains_norm: str) -> str | None:
 
 
 # ======================
-# Parsing do CSV
+# Parsing do CSV (3 blocos)
 # ======================
 def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int) -> pd.DataFrame:
     bloco = slice_rows(rows, i_altas_header, i_vagas_title)
     if len(bloco) < 2:
         return pd.DataFrame()
 
-    # Header dinâmico: pega todas as colunas não vazias do cabeçalho
     raw_header = [str(c).strip() for c in bloco[0]]
     header = []
     for h in raw_header:
@@ -267,31 +264,27 @@ def montar_altas(rows: list[list[str]], i_altas_header: int, i_vagas_title: int)
 
     df = pd.DataFrame(data, columns=header)
 
-    # Padronização de nomes
     rename = {
         "ALTAS HOSPITAL": "HOSPITAL",
         "SETOR": "SETOR",
     }
     df = df.rename(columns={c: rename.get(str(c).strip(), str(c).strip()) for c in df.columns})
 
-    # Converter automaticamente colunas numéricas de altas
     col_realizadas = find_col_by_contains(df, "ALTAS DO DIA")
     col_previstas = find_col_by_contains(df, "ALTAS PREVISTAS")
-
     if col_realizadas:
         df[col_realizadas] = to_int_series(df[col_realizadas])
     if col_previstas:
         df[col_previstas] = to_int_series(df[col_previstas])
 
-    # Filtro mínimo
+    # Se não existir HOSPITAL/SETOR (caso tenham mudado), evita quebrar
     if "HOSPITAL" in df.columns and "SETOR" in df.columns:
         df = df[(df["HOSPITAL"].astype(str).str.strip() != "") & (df["SETOR"].astype(str).str.strip() != "")]
-
     return df
 
 
-def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_cir_title: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_vagas_title + 1, i_cir_title)
+def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_transf_title: int) -> pd.DataFrame:
+    bloco = slice_rows(rows, i_vagas_title + 1, i_transf_title)
     if not bloco:
         return pd.DataFrame()
 
@@ -306,24 +299,6 @@ def montar_vagas(rows: list[list[str]], i_vagas_title: int, i_cir_title: int) ->
     df = pd.DataFrame(data, columns=["HOSPITAL", "SETOR", "VAGAS_RESERVADAS"])
     df["VAGAS_RESERVADAS"] = to_int_series(df["VAGAS_RESERVADAS"])
     df = df[(df["HOSPITAL"] != "") & (df["SETOR"] != "")]
-    return df
-
-
-def montar_cirurgias(rows: list[list[str]], i_cir_title: int, i_transf_title: int) -> pd.DataFrame:
-    bloco = slice_rows(rows, i_cir_title + 1, i_transf_title)
-    if not bloco:
-        return pd.DataFrame()
-
-    data = []
-    for r in bloco:
-        hosp = (r[0] if len(r) > 0 else "").strip()
-        desc = (r[1] if len(r) > 1 else "").strip()
-        total = (r[2] if len(r) > 2 else "").strip()
-        if hosp or desc or total:
-            data.append([hosp, desc, total])
-
-    df = pd.DataFrame(data, columns=["HOSPITAL", "DESCRIÇÃO", "TOTAL"])
-    df["TOTAL"] = to_int_series(df["TOTAL"])
     return df
 
 
@@ -348,10 +323,8 @@ def montar_transferencias(rows: list[list[str]], i_transf_title: int) -> pd.Data
 # HEADER COM LOGOS
 # ======================
 top_l, top_c, top_r = st.columns([1.2, 5.6, 1.2])
-
 with top_l:
     render_logo(LOGO_LEFT_PATH)
-
 with top_c:
     st.markdown(
         f"""
@@ -362,13 +335,11 @@ with top_c:
         """,
         unsafe_allow_html=True,
     )
-
 with top_r:
     render_logo(LOGO_RIGHT_PATH)
 
 st.markdown("")
 
-# Controles
 b1, b2, b3 = st.columns([1.3, 3.7, 2.0])
 with b1:
     if st.button("Atualizar agora"):
@@ -387,10 +358,9 @@ except Exception:
     st.error("Não foi possível carregar o CSV da planilha. Verifique permissões/publicação do Google Sheets.")
     st.stop()
 
-# Procura por substring (ignora datas entre parênteses)
+# Marcadores por substring (ALTAS pode ter data entre parênteses)
 i_altas_header = achar_linha_por_substring(rows, "ALTAS")
 i_vagas_title = achar_linha_por_substring(rows, "VAGAS RESERVADAS")
-i_cir_title = achar_linha_por_substring(rows, "CIRURGIAS PROGRAMADAS")
 i_transf_title = achar_linha_por_substring(rows, "TRANSFERENCIAS")
 
 missing = []
@@ -398,8 +368,6 @@ if i_altas_header is None:
     missing.append("ALTAS")
 if i_vagas_title is None:
     missing.append("VAGAS RESERVADAS")
-if i_cir_title is None:
-    missing.append("CIRURGIAS PROGRAMADAS")
 if i_transf_title is None:
     missing.append("TRANSFERENCIAS")
 
@@ -408,8 +376,7 @@ if missing:
     st.stop()
 
 df_altas = montar_altas(rows, i_altas_header, i_vagas_title)
-df_vagas = montar_vagas(rows, i_vagas_title, i_cir_title)
-df_cir = montar_cirurgias(rows, i_cir_title, i_transf_title)
+df_vagas = montar_vagas(rows, i_vagas_title, i_transf_title)
 df_transf = montar_transferencias(rows, i_transf_title)
 
 # ======================
@@ -420,6 +387,8 @@ col_previstas = find_col_by_contains(df_altas, "ALTAS PREVISTAS") if not df_alta
 
 total_realizadas = int(df_altas[col_realizadas].sum()) if col_realizadas else 0
 total_previstas = int(df_altas[col_previstas].sum()) if col_previstas else 0
+total_vagas = int(df_vagas["VAGAS_RESERVADAS"].sum()) if not df_vagas.empty else 0
+total_transf = int(df_transf["TOTAL"].sum()) if not df_transf.empty else 0
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
@@ -427,14 +396,14 @@ with m1:
 with m2:
     render_metric_card("Altas previstas (24h)", total_previstas, ACCENT_GREEN)
 with m3:
-    render_metric_card("Vagas reservadas", int(df_vagas["VAGAS_RESERVADAS"].sum()) if not df_vagas.empty else 0, SCS_PURPLE)
+    render_metric_card("Vagas reservadas (dia seguinte)", total_vagas, SCS_PURPLE)
 with m4:
-    render_metric_card("Cirurgias (próximo dia)", int(df_cir["TOTAL"].sum()) if not df_cir.empty else 0, SCS_CYAN)
+    render_metric_card("Transferências/Saídas (total)", total_transf, SCS_CYAN)
 
 st.markdown("")
 
 # ======================
-# TABELAS (2x2)
+# TABELAS (3 blocos)
 # ======================
 c1, c2 = st.columns(2)
 with c1:
@@ -445,21 +414,15 @@ with c1:
 
 with c2:
     st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
-    render_section_header("VAGAS RESERVADAS", f"{len(df_vagas)} linhas")
+    render_section_header("VAGAS RESERVADAS - MAPA CIRÚRGICO (DIA SEGUINTE)", f"{len(df_vagas)} linhas")
     render_df(df_vagas)
     st.markdown("</div>", unsafe_allow_html=True)
 
-c3, c4 = st.columns(2)
-with c3:
-    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
-    render_section_header("CIRURGIAS PROGRAMADAS (PRÓXIMO DIA)", f"{len(df_cir)} linhas")
-    render_df(df_cir)
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("")
 
-with c4:
-    st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
-    render_section_header("TRANSFERÊNCIAS/SAÍDAS", f"{len(df_transf)} linhas")
-    render_df(df_transf)
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("<div class='nir-card'>", unsafe_allow_html=True)
+render_section_header("TRANSFERÊNCIAS/SAÍDAS", f"{len(df_transf)} linhas")
+render_df(df_transf)
+st.markdown("</div>", unsafe_allow_html=True)
 
 st.caption("Fonte: Google Sheets (Folha1).")
